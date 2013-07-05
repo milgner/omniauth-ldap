@@ -24,6 +24,7 @@ module OmniAuth
       option :method, :plain
       option :uid, 'sAMAccountName'
       option :name_proc, lambda {|n| n}
+      option :attribute_procs, {}
 
       def request_phase
         OmniAuth::LDAP::Adaptor.validate @options
@@ -42,7 +43,7 @@ module OmniAuth
           @ldap_user_info = @adaptor.bind_as(:filter => Net::LDAP::Filter.eq(@adaptor.uid, @options[:name_proc].call(request['username'])),:size => 1, :password => request['password'])
           return fail!(:invalid_credentials) if !@ldap_user_info
 
-          @user_info = self.class.map_user(@@config, @ldap_user_info)
+          @user_info = self.class.map_user(@@config, @ldap_user_info, @options[:attribute_procs])
           super
         rescue Exception => e
           return fail!(:ldap_error, e)
@@ -59,22 +60,26 @@ module OmniAuth
         { :raw_info => @ldap_user_info }
       }
 
-      def self.map_user(mapper, object)
+      def self.map_user(mapper, object, attribute_mapping_procs)
         user = {}
         mapper.each do |key, value|
-          case value
-          when String
-            user[key] = object[value.downcase.to_sym].first if object[value.downcase.to_sym]
-          when Array
-            value.each {|v| (user[key] = object[v.downcase.to_sym].first; break;) if object[v.downcase.to_sym]}
-          when Hash
-            value.map do |key1, value1|
-              pattern = key1.dup
-              value1.each_with_index do |v,i|
-                part = ''; v.collect(&:downcase).collect(&:to_sym).each {|v1| (part = object[v1].first; break;) if object[v1]}
-                pattern.gsub!("%#{i}",part||'')
+          if attribute_mapping_procs.has_key?(key.to_sym)
+            user[key] = attribute_mapping_procs[key.to_sym].call(object)
+          else
+            case value
+            when String
+              user[key] = object[value.downcase.to_sym].first if object[value.downcase.to_sym]
+            when Array
+              value.each {|v| (user[key] = object[v.downcase.to_sym].first; break;) if object[v.downcase.to_sym]}
+            when Hash
+              value.map do |key1, value1|
+                pattern = key1.dup
+                value1.each_with_index do |v,i|
+                  part = ''; v.collect(&:downcase).collect(&:to_sym).each {|v1| (part = object[v1].first; break;) if object[v1]}
+                  pattern.gsub!("%#{i}",part||'')
+                end
+                user[key] = pattern
               end
-              user[key] = pattern
             end
           end
         end
