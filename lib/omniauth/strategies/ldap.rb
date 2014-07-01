@@ -40,13 +40,22 @@ module OmniAuth
 
         return fail!(:missing_credentials) if missing_credentials?
         begin
-          @ldap_user_info = @adaptor.bind_as(:filter => Net::LDAP::Filter.eq(@adaptor.uid, @options[:name_proc].call(request['username'])),:size => 1, :password => request['password'])
+          @ldap_user_info = @adaptor.bind_as(:filter => filter(@adaptor), :size => 1, :password => request['password'])
+
           return fail!(:invalid_credentials) if !@ldap_user_info
 
           @user_info = self.class.map_user(@@config, @ldap_user_info, @options[:attribute_procs])
           super
         rescue Exception => e
           return fail!(:ldap_error, e)
+        end
+      end
+
+      def filter adaptor
+        if adaptor.filter and !adaptor.filter.empty?
+          Net::LDAP::Filter.construct(adaptor.filter % {username: @options[:name_proc].call(request['username'])})
+        else
+          Net::LDAP::Filter.eq(adaptor.uid, @options[:name_proc].call(request['username']))
         end
       end
 
@@ -68,14 +77,14 @@ module OmniAuth
           else
             case value
             when String
-              user[key] = object[value.downcase.to_sym].first if object[value.downcase.to_sym]
+            user[key] = object[value.downcase.to_sym].first if object.respond_to? value.downcase.to_sym
             when Array
-              value.each {|v| (user[key] = object[v.downcase.to_sym].first; break;) if object[v.downcase.to_sym]}
+            value.each {|v| (user[key] = object[v.downcase.to_sym].first; break;) if object.respond_to? v.downcase.to_sym}
             when Hash
               value.map do |key1, value1|
                 pattern = key1.dup
                 value1.each_with_index do |v,i|
-                  part = ''; v.collect(&:downcase).collect(&:to_sym).each {|v1| (part = object[v1].first; break;) if object[v1]}
+                part = ''; v.collect(&:downcase).collect(&:to_sym).each {|v1| (part = object[v1].first; break;) if object.respond_to? v1}
                   pattern.gsub!("%#{i}",part||'')
                 end
                 user[key] = pattern
